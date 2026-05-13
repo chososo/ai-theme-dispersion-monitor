@@ -29,6 +29,12 @@ AI_THEMES = {
         "META",   # in-house silicon (MTIA)
         "AMZN",   # AWS / Trainium
     ],
+    "kr_ai": [
+        "005930.KS",   # Samsung Electronics — HBM, foundry
+        "000660.KS",   # SK Hynix — HBM3E leader
+        "042700.KS",   # Hanmi Semiconductor — TC bonder (HBM CAPEX beneficiary)
+        "058470.KQ",   # Leeno Industrial — semi test sockets
+    ],
 }
 
 # Macro/regime proxies — pulled with the same fetcher but used differently.
