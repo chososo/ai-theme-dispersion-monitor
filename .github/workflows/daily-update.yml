@@ -2,14 +2,21 @@ name: Daily dashboard update
 
 on:
   schedule:
-    - cron: "30 22 * * 1-5"   # 22:30 UTC weekdays ≈ post-US-close
+    # 평일 KST 07:30 → UTC 22:30 (전일)
+    - cron: "30 22 * * 0-4"
   workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: daily-refresh
+  cancel-in-progress: false
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
 
@@ -24,19 +31,22 @@ jobs:
       - name: Run pipeline
         working-directory: src
         run: |
+          set -e
           python fetch.py
           python dispersion.py
           python regime.py
+          python backtest.py
+          python factors.py
           python visualize.py
 
-      - name: Commit dashboard
+      - name: Commit refreshed pages
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add docs/index.html
-          if ! git diff --staged --quiet; then
-            git commit -m "chore: daily dashboard update"
-            git push
-          else
+          git add docs/
+          if git diff --cached --quiet; then
             echo "No changes."
+          else
+            git commit -m "chore: daily refresh $(date -u +%F)"
+            git push
           fi
