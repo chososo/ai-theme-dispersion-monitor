@@ -51,6 +51,24 @@ CREATE TABLE IF NOT EXISTS regime (
 );
 
 CREATE INDEX IF NOT EXISTS idx_prices_date ON prices(date);
+
+CREATE TABLE IF NOT EXISTS backtest_returns (
+    date     TEXT NOT NULL,
+    strategy TEXT NOT NULL,
+    ret      REAL NOT NULL,
+    nav      REAL NOT NULL,
+    PRIMARY KEY (date, strategy)
+);
+
+CREATE TABLE IF NOT EXISTS factor_exposure (
+    date    TEXT NOT NULL,
+    ticker  TEXT NOT NULL,
+    factor  TEXT NOT NULL,
+    score   REAL NOT NULL,
+    PRIMARY KEY (date, ticker, factor)
+);
+
+CREATE INDEX IF NOT EXISTS idx_factor_date ON factor_exposure(date);
 """
 
 
@@ -171,6 +189,82 @@ def load_regime() -> pd.DataFrame:
             "SELECT * FROM regime ORDER BY date", conn, parse_dates=["date"]
         )
     return df.set_index("date") if not df.empty else df
+
+
+def upsert_backtest_returns(df: pd.DataFrame) -> int:
+    """df with columns: date, strategy, ret, nav."""
+    if df.empty:
+        return 0
+    payload = [(str(pd.Timestamp(r["date"]).date()),
+                str(r["strategy"]),
+                float(r["ret"]),
+                float(r["nav"]))
+               for _, r in df.iterrows()]
+    with connect() as conn:
+        conn.executemany(
+            "INSERT OR REPLACE INTO backtest_returns VALUES (?, ?, ?, ?)",
+            payload,
+        )
+    return len(payload)
+
+
+def upsert_factor_exposure(df: pd.DataFrame) -> int:
+    """df with columns: date, ticker, factor, score (long format)."""
+    if df.empty:
+        return 0
+    payload = [(str(pd.Timestamp(r["date"]).date()),
+                str(r["ticker"]),
+                str(r["factor"]),
+                float(r["score"]))
+               for _, r in df.iterrows()
+               if pd.notna(r["score"])]
+    with connect() as conn:
+        conn.executemany(
+            "INSERT OR REPLACE INTO factor_exposure VALUES (?, ?, ?, ?)",
+            payload,
+        )
+    return len(payload)
+
+
+def load_backtest_returns(strategy: str | None = None) -> pd.DataFrame:
+    if strategy:
+        q = "SELECT * FROM backtest_returns WHERE strategy=? ORDER BY date"
+        params: tuple = (strategy,)
+    else:
+        q = "SELECT * FROM backtest_returns ORDER BY date"
+        params = ()
+    with connect() as conn:
+        df = pd.read_sql_query(q, conn, params=params, parse_dates=["date"])
+    return df
+
+
+def load_latest_factor_exposure() -> pd.DataFrame:
+    """Wide-format pivot of the most recent date's factor scores."""
+    q = """
+    SELECT date, ticker, factor, score
+    FROM factor_exposure
+    WHERE date = (SELECT MAX(date) FROM factor_exposure)
+    """
+    with connect() as conn:
+        df = pd.read_sql_query(q, conn, parse_dates=["date"])
+    if df.empty:
+        return df
+    return df.pivot(index="ticker", columns="factor", values="score")
+
+
+def load_factor_exposure_history(factor: str) -> pd.DataFrame:
+    """Wide pivot for one factor: date × ticker."""
+    q = """
+    SELECT date, ticker, score
+    FROM factor_exposure
+    WHERE factor = ?
+    ORDER BY date
+    """
+    with connect() as conn:
+        df = pd.read_sql_query(q, conn, params=(factor,), parse_dates=["date"])
+    if df.empty:
+        return df
+    return df.pivot(index="date", columns="ticker", values="score")
 
 
 def _none_if_nan(v):
